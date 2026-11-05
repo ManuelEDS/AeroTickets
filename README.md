@@ -25,25 +25,6 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
 
 ---
 
-## 🧭 Flowchart & State Machine
-
-```mermaid
-flowchart TD
-    Start([Ticket Start: User clicks a category button]) --> OpenModal[Bot opens the category-specific modal]
-    OpenModal --> FillForm{Fill in category fields}
-    FillForm -->|Submit| CreateChan[Bot creates private channel + saves ticket]
-    CreateChan --> StaffNotif[State: RESOLVED. Notify Staff + Show 🔴 Close Ticket]
-    StaffNotif --> StaffAssists[Staff team handles and resolves ticket]
-    StaffAssists --> CloseReq[User/Staff clicks 🔴 Close Ticket]
-    CloseReq --> ConfirmClose{⚠️ Confirm Closure}
-    ConfirmClose -->|Confirm| GenTranscript[Generate Markdown Transcript & Save to Disk]
-    GenTranscript --> LogDB[Insert into transcripts_log table]
-    LogDB --> UploadDiscord[Upload .md to Transcript Channel + DM user]
-    UploadDiscord --> DelChannel([Delete Ticket Channel])
-```
-
----
-
 ## 📁 Project Structure
 
 ```
