@@ -1,0 +1,29 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+aerobot
+bin/
+dist/
+
+# Configuration with sensitive tokens
+config.json
+
+# Database and SQLite temporary journal files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# Transcripts (if kept private locally)
+transcripts/*.md
+!transcripts/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

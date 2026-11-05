@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  aerobot:
+    build: .
+    container_name: aerobot
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+      - ./transcripts:/app/transcripts
+    environment:
+      - DATABASE_PATH=/app/data/aerobot.db
+      - TRANSCRIPT_FOLDER_PATH=/app/transcripts
+      - TZ=UTC
