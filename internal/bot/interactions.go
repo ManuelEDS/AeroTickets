@@ -69,8 +69,8 @@ func (b *Bot) handleComponentInteraction(s *discordgo.Session, i *discordgo.Inte
 }
 
 func (b *Bot) handleTeleportCommandButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Member == nil || i.Member.Permissions&(discordgo.PermissionAdministrator|discordgo.PermissionManageChannels) == 0 {
-		respondEphemeral(s, i, "⚠️ Only server administrators can use this button.")
+	if !b.isStaffInteraction(i) {
+		respondEphemeral(s, i, "Only configured ticket staff or members with Manage Channels/Administrator can use this button.")
 		return
 	}
 
@@ -172,16 +172,6 @@ func (b *Bot) deleteCategoryPicker(s *discordgo.Session, userID, channelID strin
 	}); err != nil {
 		log.Printf("[Warning] Failed to delete ephemeral category picker for user %s: %v", userID, err)
 	}
-}
-
-func (b *Bot) staffMentionText() string {
-	var mentions []string
-	for _, roleID := range b.cfg.StaffRoleIDs {
-		if strings.TrimSpace(roleID) != "" {
-			mentions = append(mentions, fmt.Sprintf("<@&%s>", roleID))
-		}
-	}
-	return strings.Join(mentions, " ")
 }
 
 func (b *Bot) createTicketChannel(s *discordgo.Session, userID, username, category string) (*discordgo.Channel, error) {
@@ -453,11 +443,9 @@ func (b *Bot) handleExistingTicketModal(s *discordgo.Session, i *discordgo.Inter
 		}
 	}
 
-	mentionText := b.staffMentionText()
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content:    mentionText,
 			Embeds:     []*discordgo.MessageEmbed{TicketSummaryEmbed(updated, b.cfg.StaffRoleIDs)},
 			Components: TicketActionComponents(updated),
 		},
@@ -529,10 +517,10 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 		log.Printf("[Warning] Failed to rename ticket channel %s to %s: %v", channel.ID, channelName, err)
 	}
 
-	content := fmt.Sprintf("👋 Welcome <@%s>! **Ticket #%d** has been opened.", userID, ticket.ID)
-	if mentionText := b.staffMentionText(); mentionText != "" {
-		content += "\n\n" + mentionText
-	}
+	content := fmt.Sprintf("👋 Welcome <@%s>! **Ticket #%d** has been opened.\n\n", userID, ticket.ID) +
+		"Please do not ping individual staff members or the @everyone/@here roles for personal matters or routine ticket inquiries.\n\n" +
+		"Direct pings are strictly reserved for critical emergencies that impact the entire server (such as major downtime, severe network issues, or ongoing malicious attacks).\n\n" +
+		"Pinging staff for non-urgent requests will not result in a faster response and may delay your support. A team member will assist you as soon as possible. Thank you for your patience and cooperation!"
 
 	if _, err := s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Content:    content,

@@ -349,7 +349,7 @@ func TicketSummaryEmbed(ticket *models.Ticket, staffRoleIDs []string) *discordgo
 
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("🎫 Ticket #%d Details", ticket.ID),
-		Description: "Your details have been registered! Our staff team has been notified and will assist you shortly.",
+		Description: "Your details have been registered! A team member will assist you as soon as possible.",
 		Color:       ColorSuccess,
 		Fields:      fields,
 		Footer: &discordgo.MessageEmbedFooter{
