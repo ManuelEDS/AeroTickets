@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"aerobot/internal/database"
@@ -14,6 +15,14 @@ import (
 type interactionRef struct {
 	appID string
 	token string
+}
+
+const maxActiveTicketsPerUser = 3
+
+var coordinateNumberPattern = regexp.MustCompile(`-?\d+(?:\.\d+)?`)
+
+func sanitizeCoordinates(value string) string {
+	return strings.Join(coordinateNumberPattern.FindAllString(value, -1), " ")
 }
 
 func categoryPickerKey(userID, channelID string) string {
@@ -53,7 +62,34 @@ func (b *Bot) handleComponentInteraction(s *discordgo.Session, i *discordgo.Inte
 
 	case IDTicketCloseCancel:
 		b.handleCloseCancelButton(s, i)
+
+	case IDTicketTeleportCopy:
+		b.handleTeleportCommandButton(s, i)
 	}
+}
+
+func (b *Bot) handleTeleportCommandButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Member == nil || i.Member.Permissions&(discordgo.PermissionAdministrator|discordgo.PermissionManageChannels) == 0 {
+		respondEphemeral(s, i, "⚠️ Only server administrators can use this button.")
+		return
+	}
+
+	ticket, err := b.db.GetTicketByChannelID(i.ChannelID)
+	if err != nil {
+		log.Printf("[Error] Failed to load ticket for teleport command in channel %s: %v", i.ChannelID, err)
+		respondEphemeral(s, i, "❌ Could not load this ticket. Please try again.")
+		return
+	}
+	if ticket.Category != string(models.CategoryGriefing) {
+		respondEphemeral(s, i, "⚠️ Teleport commands are only available for Griefing tickets.")
+		return
+	}
+	coordinates := sanitizeCoordinates(ticket.CategoryDetails)
+	if coordinates == "" {
+		respondEphemeral(s, i, "⚠️ This ticket does not contain valid coordinates.")
+		return
+	}
+	respondEphemeral(s, i, fmt.Sprintf("Copy this Minecraft command:\n```\n/tp %s\n```", coordinates))
 }
 
 // handleCreateTicketButton keeps old panels working by showing the category buttons ephemerally.
@@ -64,14 +100,14 @@ func (b *Bot) handleCreateTicketButton(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 
-	activeTicket, err := b.db.GetActiveTicketForUser(userID)
+	activeTickets, err := b.db.CountActiveTicketsForUser(userID)
 	if err != nil {
 		log.Printf("[Error] Failed to check active ticket for user %s: %v", userID, err)
 		respondEphemeral(s, i, "❌ Could not check your existing tickets. Please try again.")
 		return
 	}
-	if activeTicket != nil {
-		respondEphemeral(s, i, fmt.Sprintf("⚠️ You already have an active ticket open in <#%s>. Please use your existing ticket or close it first.", activeTicket.ChannelID))
+	if activeTickets >= maxActiveTicketsPerUser {
+		respondEphemeral(s, i, fmt.Sprintf("⚠️ You already have %d active tickets. The limit is %d; close one before creating another.", activeTickets, maxActiveTicketsPerUser))
 		return
 	}
 
@@ -223,14 +259,14 @@ func (b *Bot) handleCategoryButton(s *discordgo.Session, i *discordgo.Interactio
 
 	ticket, err := b.db.GetTicketByChannelID(i.ChannelID)
 	if errors.Is(err, database.ErrTicketNotFound) {
-		activeTicket, activeErr := b.db.GetActiveTicketForUser(userID)
+		activeTickets, activeErr := b.db.CountActiveTicketsForUser(userID)
 		if activeErr != nil {
 			log.Printf("[Error] Failed to check active ticket for user %s: %v", userID, activeErr)
 			respondEphemeral(s, i, "❌ Could not check your existing tickets. Please try again.")
 			return
 		}
-		if activeTicket != nil {
-			respondEphemeral(s, i, fmt.Sprintf("⚠️ You already have an active ticket open in <#%s>. Please use your existing ticket or close it first.", activeTicket.ChannelID))
+		if activeTickets >= maxActiveTicketsPerUser {
+			respondEphemeral(s, i, fmt.Sprintf("⚠️ You already have %d active tickets. The limit is %d; close one before creating another.", activeTickets, maxActiveTicketsPerUser))
 			return
 		}
 
@@ -312,7 +348,7 @@ func parseTicketModal(data discordgo.ModalSubmitInteractionData) (ticketModalVal
 	switch data.CustomID {
 	case IDModalGriefing:
 		values.category = string(models.CategoryGriefing)
-		values.categoryDetails = fields[IDFieldCoords]
+		values.categoryDetails = sanitizeCoordinates(fields[IDFieldCoords])
 	case IDModalShip:
 		values.category = string(models.CategoryShip)
 		values.categoryDetails = fields[IDFieldShipDetails]
@@ -423,7 +459,7 @@ func (b *Bot) handleExistingTicketModal(s *discordgo.Session, i *discordgo.Inter
 		Data: &discordgo.InteractionResponseData{
 			Content:    mentionText,
 			Embeds:     []*discordgo.MessageEmbed{TicketSummaryEmbed(updated, b.cfg.StaffRoleIDs)},
-			Components: CloseTicketButtonComponent(),
+			Components: TicketActionComponents(updated),
 		},
 	}); err != nil {
 		log.Printf("[Error] Failed to send ticket summary for channel %s: %v", i.ChannelID, err)
@@ -460,14 +496,14 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 		}
 	}
 
-	activeTicket, err := b.db.GetActiveTicketForUser(userID)
+	activeTickets, err := b.db.CountActiveTicketsForUser(userID)
 	if err != nil {
 		log.Printf("[Error] Failed to check active ticket for user %s: %v", userID, err)
 		respond("❌ Could not check your existing tickets. Please try again.")
 		return
 	}
-	if activeTicket != nil {
-		respond(fmt.Sprintf("⚠️ You already have an active ticket open in <#%s>. Please use your existing ticket or close it first.", activeTicket.ChannelID))
+	if activeTickets >= maxActiveTicketsPerUser {
+		respond(fmt.Sprintf("⚠️ You already have %d active tickets. The limit is %d; close one before creating another.", activeTickets, maxActiveTicketsPerUser))
 		return
 	}
 
@@ -501,7 +537,7 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 	if _, err := s.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{
 		Content:    content,
 		Embeds:     []*discordgo.MessageEmbed{TicketSummaryEmbed(ticket, b.cfg.StaffRoleIDs)},
-		Components: CloseTicketButtonComponent(),
+		Components: TicketActionComponents(ticket),
 	}); err != nil {
 		log.Printf("[Error] Failed to send ticket summary in channel %s: %v", channel.ID, err)
 	}

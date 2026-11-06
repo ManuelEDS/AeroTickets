@@ -38,9 +38,9 @@ func New(cfg *config.Config, db *database.DB, tg *transcript.Generator) (*Bot, e
 		return nil, fmt.Errorf("failed to create discord session: %w", err)
 	}
 
-	// Only the guilds intent is needed; tickets are driven entirely by interactions,
-	// so no privileged (members/message-content) intents are required.
-	session.Identify.Intents = discordgo.IntentsGuilds
+	// Ticket flows are interaction-driven, but transcript generation reads message
+	// content through the channel message API, which requires Message Content access.
+	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsMessageContent
 
 	b := &Bot{
 		session: session,

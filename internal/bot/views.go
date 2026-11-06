@@ -20,6 +20,7 @@ const (
 	IDTicketCloseRequest = "ticket_close_request"
 	IDTicketCloseConfirm = "ticket_close_confirm"
 	IDTicketCloseCancel  = "ticket_close_cancel"
+	IDTicketTeleportCopy = "ticket_teleport_copy"
 
 	// Modals
 	IDModalGriefing = "modal_griefing"
@@ -150,6 +151,27 @@ func CloseTicketButtonComponent() []discordgo.MessageComponent {
 			},
 		},
 	}
+}
+
+// TicketActionComponents returns the controls available on a ticket summary.
+func TicketActionComponents(ticket *models.Ticket) []discordgo.MessageComponent {
+	buttons := []discordgo.MessageComponent{
+		discordgo.Button{
+			Label:    "Close Ticket",
+			Style:    discordgo.DangerButton,
+			CustomID: IDTicketCloseRequest,
+			Emoji:    &discordgo.ComponentEmoji{Name: "🔴"},
+		},
+	}
+	if ticket.Category == string(models.CategoryGriefing) && ticket.CategoryDetails != "" {
+		buttons = append(buttons, discordgo.Button{
+			Label:    "Copy Teleport Command",
+			Style:    discordgo.PrimaryButton,
+			CustomID: IDTicketTeleportCopy,
+			Emoji:    &discordgo.ComponentEmoji{Name: "📋"},
+		})
+	}
+	return []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}
 }
 
 // CloseConfirmationComponents returns the confirm / cancel buttons

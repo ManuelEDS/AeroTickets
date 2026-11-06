@@ -196,35 +196,40 @@ func (d *DB) UpdateTicketInfo(channelID, category, nickname, categoryDetails, ad
 	return nil
 }
 
-// GetActiveTicketForUser checks if a user already has an active (non-closed) ticket
+// CountActiveTicketsForUser returns the number of tickets a user has that are not closed.
+func (d *DB) CountActiveTicketsForUser(userID string) (int, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	query := `SELECT COUNT(*) FROM tickets WHERE user_id = ? AND status != ?`
+	var count int
+	err := d.conn.QueryRow(query, userID, string(models.StatusClosed)).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active tickets: %w", err)
+	}
+	return count, nil
+}
+
+// GetActiveTicketForUser returns the most recently created non-closed ticket for a user.
 func (d *DB) GetActiveTicketForUser(userID string) (*models.Ticket, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	query := `SELECT id, channel_id, user_id, status, category, ingame_nickname, category_details, additional_info, problem_description, created_at
 			  FROM tickets WHERE user_id = ? AND status != ? ORDER BY created_at DESC LIMIT 1`
-
 	var t models.Ticket
-	var statusStr string
+	var status string
 	err := d.conn.QueryRow(query, userID, string(models.StatusClosed)).Scan(
-		&t.ID,
-		&t.ChannelID,
-		&t.UserID,
-		&statusStr,
-		&t.Category,
-		&t.IngameNickname,
-		&t.CategoryDetails,
-		&t.AdditionalInfo,
-		&t.ProblemDescription,
-		&t.CreatedAt,
+		&t.ID, &t.ChannelID, &t.UserID, &status, &t.Category, &t.IngameNickname,
+		&t.CategoryDetails, &t.AdditionalInfo, &t.ProblemDescription, &t.CreatedAt,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // No active ticket
-		}
 		return nil, fmt.Errorf("failed to query active ticket: %w", err)
 	}
-	t.Status = models.TicketStatus(statusStr)
+	t.Status = models.TicketStatus(status)
 	return &t, nil
 }
 

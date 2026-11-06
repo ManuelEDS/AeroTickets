@@ -35,7 +35,7 @@ AeroBot/
 ├── internal/
 │   ├── bot/
 │   │   ├── bot.go                  # Discord session lifecycle, transcript upload & orphan cleanup
-│   │   ├── commands.go             # Slash commands (/setup-panel, /close, /ticket-info)
+│   │   ├── commands.go             # Slash commands (/setup-panel, /close, /ticket-info, /add-user)
 │   │   ├── interactions.go         # Buttons, category modals & close/confirm handlers
 │   │   └── views.go                # Embeds, modals and interactive UI components
 │   ├── config/
@@ -108,7 +108,7 @@ All settings can alternatively be provided or overridden via environment variabl
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application**.
 2. Navigate to the **Bot** tab:
    - Click **Reset Token** and copy the token to your `config.json`.
-   - **Privileged Gateway Intents are not required.** The bot only requests the standard `Guilds` intent and is driven entirely by slash commands, buttons, and modals.
+   - Under **Privileged Gateway Intents**, enable **Message Content Intent**. Transcript generation fetches message content from ticket channels. The bot does not need the Server Members or Presence intents.
 3. Navigate to **OAuth2 -> URL Generator**:
    - **Scopes**: `bot`, `applications.commands`
    - **Bot Permissions**:
@@ -177,6 +177,13 @@ In the channel where you want users to create tickets (e.g., `#support-tickets`)
 1. Click **`🔴 Close Ticket`** or run `/close`.
 2. Click **`⚠️ Confirm Closure`**.
 3. AeroBot generates the `.md` transcript, saves it to `./transcripts/ticket-<zero-padded id>-<user>.md` (e.g. `ticket-0052-ShadowPilot_1234.md`), uploads the file to the transcript archive channel, and deletes the ticket channel.
+
+### 4. Adding Someone to a Ticket
+In a ticket channel, configured staff or members with Administrator / Manage Channels permission can run:
+```
+/add-user user:@member
+```
+The selected member receives permission to view and participate in that ticket.
 
 ---
 
