@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 
 	"aerobot/internal/database"
 	"aerobot/internal/models"
@@ -624,38 +625,84 @@ func (b *Bot) disableCategoryButtons(s *discordgo.Session, channelID string) {
 	}
 }
 
+// isTicketCategoryChannel reports whether the channel sits under the configured ticket category.
+// It is used to recognise orphaned ticket channels that no longer have a database row.
+func (b *Bot) isTicketCategoryChannel(s *discordgo.Session, channelID string) bool {
+	if strings.TrimSpace(b.cfg.CategoryID) == "" {
+		return false
+	}
+	channel, err := s.Channel(channelID)
+	if err != nil || channel == nil {
+		return false
+	}
+	return channel.ParentID == b.cfg.CategoryID
+}
+
 // authorizeTicketClosure ensures only the ticket creator or staff can close a ticket.
-func (b *Bot) authorizeTicketClosure(s *discordgo.Session, i *discordgo.InteractionCreate) (*models.Ticket, bool) {
+// The second return value is true when the channel is an orphaned ticket channel
+// (in the ticket category but with no database row); those can only be closed by staff.
+func (b *Bot) authorizeTicketClosure(s *discordgo.Session, i *discordgo.InteractionCreate) (*models.Ticket, bool, bool) {
 	ticket, err := b.db.GetTicketByChannelID(i.ChannelID)
 	if err != nil {
 		if errors.Is(err, database.ErrTicketNotFound) {
+			if b.isTicketCategoryChannel(s, i.ChannelID) {
+				if !b.isStaffInteraction(i) {
+					respondEphemeral(s, i, "⚠️ This ticket has no database record. Only staff can close it.")
+					return nil, false, false
+				}
+				return nil, true, true
+			}
 			respondEphemeral(s, i, "⚠️ This channel is not an active support ticket channel.")
 		} else {
 			log.Printf("[Error] Failed to load ticket for channel %s: %v", i.ChannelID, err)
 			respondEphemeral(s, i, "❌ Could not load this ticket. Please try again.")
 		}
-		return nil, false
+		return nil, false, false
 	}
 
 	userID, _ := interactionUser(i)
 	if userID != ticket.UserID && !b.isStaffInteraction(i) {
 		respondEphemeral(s, i, "⚠️ Only the ticket creator or staff can close this ticket.")
-		return nil, false
+		return nil, false, false
 	}
 
-	return ticket, true
+	return ticket, false, true
+}
+
+// closeOrphanedTicket deletes a ticket channel that has no database record.
+// No transcript is generated because there is no ticket metadata to attach it to.
+func (b *Bot) closeOrphanedTicket(s *discordgo.Session, channelID string) {
+	defer b.closing.Delete(channelID)
+	b.categoryPrompt.Delete(channelID)
+
+	if _, err := s.ChannelMessageSend(channelID, "✅ **Ticket channel closed.** This channel had no database record, so no transcript was generated. Deleting channel in 5 seconds..."); err != nil {
+		log.Printf("[Warning] Failed to send orphan closure notice in channel %s: %v", channelID, err)
+	}
+
+	time.Sleep(5 * time.Second)
+	if _, err := s.ChannelDelete(channelID); err != nil {
+		log.Printf("[Error] Failed to delete orphaned ticket channel %s: %v", channelID, err)
+	} else {
+		log.Printf("[Bot] Deleted orphaned ticket channel %s (no database record).", channelID)
+	}
 }
 
 // handleCloseRequestButton prompts with confirmation buttons
 func (b *Bot) handleCloseRequestButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+	_, orphan, ok := b.authorizeTicketClosure(s, i)
+	if !ok {
 		return
+	}
+
+	content := "⚠️ **Are you sure you want to close this ticket?**\nA transcript will be generated and archived before this channel is deleted."
+	if orphan {
+		content = "⚠️ **Are you sure you want to close this ticket?**\nThis channel has no database record, so no transcript will be generated. The channel will be deleted."
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content:    "⚠️ **Are you sure you want to close this ticket?**\nA transcript will be generated and archived before this channel is deleted.",
+			Content:    content,
 			Components: CloseConfirmationComponents(),
 		},
 	})
@@ -663,7 +710,7 @@ func (b *Bot) handleCloseRequestButton(s *discordgo.Session, i *discordgo.Intera
 
 // handleCloseCancelButton dismisses the closure prompt
 func (b *Bot) handleCloseCancelButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+	if _, _, ok := b.authorizeTicketClosure(s, i); !ok {
 		return
 	}
 
@@ -678,7 +725,8 @@ func (b *Bot) handleCloseCancelButton(s *discordgo.Session, i *discordgo.Interac
 
 // handleCloseConfirmButton initiates transcript generation and channel deletion
 func (b *Bot) handleCloseConfirmButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+	ticket, orphan, ok := b.authorizeTicketClosure(s, i)
+	if !ok {
 		return
 	}
 
@@ -694,13 +742,23 @@ func (b *Bot) handleCloseConfirmButton(s *discordgo.Session, i *discordgo.Intera
 		return
 	}
 
+	status := "⏳ **Closing ticket and generating transcript...**"
+	if orphan {
+		status = "⏳ **Closing ticket channel...**"
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
-			Content:    "⏳ **Closing ticket and generating transcript...**",
+			Content:    status,
 			Components: []discordgo.MessageComponent{},
 		},
 	})
+
+	if orphan {
+		go b.closeOrphanedTicket(s, i.ChannelID)
+		return
+	}
 
 	userTag := ""
 	if i.Member != nil && i.Member.User != nil {
@@ -710,5 +768,5 @@ func (b *Bot) handleCloseConfirmButton(s *discordgo.Session, i *discordgo.Intera
 		}
 	}
 
-	go b.closeTicketAndGenerateTranscript(s, i.ChannelID, userTag)
+	go b.closeTicketAndGenerateTranscript(s, ticket, userTag)
 }

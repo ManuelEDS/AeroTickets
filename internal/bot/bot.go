@@ -337,17 +337,14 @@ func (b *Bot) fetchAllMessages(channelID string) ([]*discordgo.Message, error) {
 }
 
 // closeTicketAndGenerateTranscript coordinates transcript generation, logging, uploading, and channel deletion
-func (b *Bot) closeTicketAndGenerateTranscript(s *discordgo.Session, channelID string, closedBy string) {
-	defer b.closing.Delete(channelID)
-	b.categoryPrompt.Delete(channelID)
-
-	ticket, err := b.db.GetTicketByChannelID(channelID)
-	if err != nil {
-		log.Printf("[Error] Failed to find ticket for channel %s: %v", channelID, err)
-		s.ChannelMessageSend(channelID, "❌ Error retrieving ticket record from database.")
+func (b *Bot) closeTicketAndGenerateTranscript(s *discordgo.Session, ticket *models.Ticket, closedBy string) {
+	if ticket == nil {
 		return
 	}
-
+	channelID := ticket.ChannelID
+	defer b.closing.Delete(channelID)
+	b.categoryPrompt.Delete(channelID)
+	var err error
 	if ticket.Status == models.StatusClosed {
 		log.Printf("[Bot] Ticket #%d (channel %s) is already closed; skipping duplicate closure.", ticket.ID, channelID)
 		return

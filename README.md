@@ -188,6 +188,20 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### ⚠️ Run only one instance per bot token
+
+Discord delivers every interaction to **all** sessions connected with the same bot token. Running two instances at once (for example, the Docker container **and** `go run ./cmd/bot`) causes duplicate acknowledgements (`Interaction has already been acknowledged` / `Unknown interaction`) and can split tickets across two SQLite files.
+
+Also make sure every run uses the same database file. The Docker setup uses `/app/data/aerobot.db` (host `./data/aerobot.db`). When running the binary directly, point it at the same file:
+
+```bash
+DATABASE_PATH=./data/aerobot.db ./aerobot -config config.json
+```
+
+### 🧹 Orphaned ticket channels
+
+If a ticket channel exists in Discord but its row is missing from SQLite (for example, after deleting or moving the database), closing it reports a clear message instead of `Error retrieving ticket record from database`. Staff can still close these channels with `/close` or the close button; the bot deletes the channel without a transcript because there is no ticket record to attach it to.
+
 ---
 
 ## 💬 Commands & Usage

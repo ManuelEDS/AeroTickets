@@ -216,12 +216,12 @@ func (b *Bot) cmdSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate
 }
 
 func (b *Bot) cmdCloseTicket(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	ticket, ok := b.authorizeTicketClosure(s, i)
+	ticket, orphan, ok := b.authorizeTicketClosure(s, i)
 	if !ok {
 		return
 	}
 
-	if ticket.Status == models.StatusClosed {
+	if !orphan && ticket.Status == models.StatusClosed {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -232,10 +232,15 @@ func (b *Bot) cmdCloseTicket(s *discordgo.Session, i *discordgo.InteractionCreat
 		return
 	}
 
+	content := "⚠️ **Are you sure you want to close this ticket?**\nA transcript will be generated and archived before this channel is deleted."
+	if orphan {
+		content = "⚠️ **Are you sure you want to close this ticket?**\nThis channel has no database record, so no transcript will be generated. The channel will be deleted."
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content:    "⚠️ **Are you sure you want to close this ticket?**\nA transcript will be generated and archived before this channel is deleted.",
+			Content:    content,
 			Components: CloseConfirmationComponents(),
 		},
 	})
