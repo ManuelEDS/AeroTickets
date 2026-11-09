@@ -497,6 +497,24 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 		}
 	}
 
+	// Serialize creation per user so concurrent submissions cannot bypass the active-ticket limit.
+	creationLock := b.ticketCreationLock(userID)
+	creationLock.Lock()
+	defer creationLock.Unlock()
+
+	if remaining, ok := b.reserveTicketCreation(userID); !ok {
+		seconds := int(remaining.Seconds()) + 1
+		respond(fmt.Sprintf("⏳ Please wait %d seconds before creating another ticket.", seconds))
+		return
+	}
+
+	ticketCreated := false
+	defer func() {
+		if !ticketCreated {
+			b.releaseTicketCreation(userID)
+		}
+	}()
+
 	activeTickets, err := b.db.CountActiveTicketsForUser(userID)
 	if err != nil {
 		log.Printf("[Error] Failed to check active ticket for user %s: %v", userID, err)
@@ -524,6 +542,7 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 		respond("❌ Database error when creating your ticket. Please try again.")
 		return
 	}
+	ticketCreated = true
 
 	channelName := models.TicketChannelName(ticket.ID, ticket.Category)
 	if _, err := s.ChannelEdit(channel.ID, &discordgo.ChannelEdit{Name: channelName}); err != nil {
@@ -605,8 +624,34 @@ func (b *Bot) disableCategoryButtons(s *discordgo.Session, channelID string) {
 	}
 }
 
+// authorizeTicketClosure ensures only the ticket creator or staff can close a ticket.
+func (b *Bot) authorizeTicketClosure(s *discordgo.Session, i *discordgo.InteractionCreate) (*models.Ticket, bool) {
+	ticket, err := b.db.GetTicketByChannelID(i.ChannelID)
+	if err != nil {
+		if errors.Is(err, database.ErrTicketNotFound) {
+			respondEphemeral(s, i, "⚠️ This channel is not an active support ticket channel.")
+		} else {
+			log.Printf("[Error] Failed to load ticket for channel %s: %v", i.ChannelID, err)
+			respondEphemeral(s, i, "❌ Could not load this ticket. Please try again.")
+		}
+		return nil, false
+	}
+
+	userID, _ := interactionUser(i)
+	if userID != ticket.UserID && !b.isStaffInteraction(i) {
+		respondEphemeral(s, i, "⚠️ Only the ticket creator or staff can close this ticket.")
+		return nil, false
+	}
+
+	return ticket, true
+}
+
 // handleCloseRequestButton prompts with confirmation buttons
 func (b *Bot) handleCloseRequestButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+		return
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
@@ -618,6 +663,10 @@ func (b *Bot) handleCloseRequestButton(s *discordgo.Session, i *discordgo.Intera
 
 // handleCloseCancelButton dismisses the closure prompt
 func (b *Bot) handleCloseCancelButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+		return
+	}
+
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
@@ -629,6 +678,10 @@ func (b *Bot) handleCloseCancelButton(s *discordgo.Session, i *discordgo.Interac
 
 // handleCloseConfirmButton initiates transcript generation and channel deletion
 func (b *Bot) handleCloseConfirmButton(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if _, ok := b.authorizeTicketClosure(s, i); !ok {
+		return
+	}
+
 	// Guard against a double-click generating duplicate transcripts/uploads.
 	if _, loaded := b.closing.LoadOrStore(i.ChannelID, struct{}{}); loaded {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -649,9 +702,12 @@ func (b *Bot) handleCloseConfirmButton(s *discordgo.Session, i *discordgo.Intera
 		},
 	})
 
-	userTag := i.Member.User.Username
-	if i.Member.User.Discriminator != "0" && i.Member.User.Discriminator != "" {
-		userTag = fmt.Sprintf("%s#%s", i.Member.User.Username, i.Member.User.Discriminator)
+	userTag := ""
+	if i.Member != nil && i.Member.User != nil {
+		userTag = i.Member.User.Username
+		if i.Member.User.Discriminator != "0" && i.Member.User.Discriminator != "" {
+			userTag = fmt.Sprintf("%s#%s", i.Member.User.Username, i.Member.User.Discriminator)
+		}
 	}
 
 	go b.closeTicketAndGenerateTranscript(s, i.ChannelID, userTag)

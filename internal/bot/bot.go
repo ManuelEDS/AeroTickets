@@ -17,8 +17,15 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// availableStaffRoleName is the name of the self-assignable role pinged for new tickets.
-const availableStaffRoleName = "available staff"
+const (
+	// availableStaffRoleName is the name of the self-assignable role pinged for new tickets.
+	availableStaffRoleName = "available staff"
+	// ticketCreationCooldown limits how often a single user can open a new ticket.
+	ticketCreationCooldown = 60 * time.Second
+	// Transcript caps keep a malicious or very busy ticket from exhausting memory/disk.
+	maxTranscriptMessages = 5000
+	maxTranscriptBytes    = 5 * 1024 * 1024
+)
 
 // Bot manages the Discord ticket bot lifecycle and events
 type Bot struct {
@@ -36,6 +43,11 @@ type Bot struct {
 	// roleMu guards availableStaffRoleID, which is set once the availability role exists.
 	roleMu               sync.RWMutex
 	availableStaffRoleID string
+	// ticketCreationLocks serializes ticket creation per user so the active-ticket limit is enforced atomically.
+	ticketCreationLocks sync.Map
+	// creationMu guards lastTicketCreation, used to rate-limit new tickets per user.
+	creationMu         sync.Mutex
+	lastTicketCreation map[string]time.Time
 }
 
 // New creates a new Bot instance
@@ -50,10 +62,11 @@ func New(cfg *config.Config, db *database.DB, tg *transcript.Generator) (*Bot, e
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsMessageContent
 
 	b := &Bot{
-		session: session,
-		cfg:     cfg,
-		db:      db,
-		tg:      tg,
+		session:            session,
+		cfg:                cfg,
+		db:                 db,
+		tg:                 tg,
+		lastTicketCreation: make(map[string]time.Time),
 	}
 
 	// Register event handlers
@@ -117,6 +130,43 @@ func (b *Bot) getAvailableStaffRoleID() string {
 	b.roleMu.RLock()
 	defer b.roleMu.RUnlock()
 	return b.availableStaffRoleID
+}
+
+// ticketCreationLock returns the per-user mutex used to serialize ticket creation.
+func (b *Bot) ticketCreationLock(userID string) *sync.Mutex {
+	lock, _ := b.ticketCreationLocks.LoadOrStore(userID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+// reserveTicketCreation enforces the per-user cooldown and records the creation time.
+// It returns the remaining cooldown when the user must wait.
+func (b *Bot) reserveTicketCreation(userID string) (time.Duration, bool) {
+	now := time.Now()
+
+	b.creationMu.Lock()
+	defer b.creationMu.Unlock()
+
+	for id, last := range b.lastTicketCreation {
+		if now.Sub(last) >= ticketCreationCooldown {
+			delete(b.lastTicketCreation, id)
+		}
+	}
+
+	if last, ok := b.lastTicketCreation[userID]; ok {
+		if remaining := ticketCreationCooldown - now.Sub(last); remaining > 0 {
+			return remaining, false
+		}
+	}
+
+	b.lastTicketCreation[userID] = now
+	return 0, true
+}
+
+// releaseTicketCreation clears the cooldown after a failed creation so the user can retry.
+func (b *Bot) releaseTicketCreation(userID string) {
+	b.creationMu.Lock()
+	delete(b.lastTicketCreation, userID)
+	b.creationMu.Unlock()
 }
 
 // availableStaffRoleMention returns the role mention used to ping available staff, or "" if unavailable.
@@ -211,13 +261,40 @@ func (b *Bot) reconcileOrphanedTickets() {
 	}
 }
 
-// fetchAllMessages retrieves all messages in a channel in chronological order
+// messageContentSize approximates the transcript footprint of a message.
+func messageContentSize(msg *discordgo.Message) int {
+	if msg == nil {
+		return 0
+	}
+	size := len(msg.Content)
+	for _, att := range msg.Attachments {
+		if att != nil {
+			size += len(att.Filename) + len(att.URL)
+		}
+	}
+	for _, emb := range msg.Embeds {
+		if emb != nil {
+			size += len(emb.Title) + len(emb.Description)
+		}
+	}
+	return size
+}
+
+// fetchAllMessages retrieves messages in chronological order, capped to keep memory and
+// transcript size bounded. When capped, the newest messages are kept.
 func (b *Bot) fetchAllMessages(channelID string) ([]*discordgo.Message, error) {
 	var allMessages []*discordgo.Message
 	var lastMessageID string
 	limit := 100
+	totalBytes := 0
+	truncated := false
 
 	for {
+		if len(allMessages) >= maxTranscriptMessages || totalBytes >= maxTranscriptBytes {
+			truncated = true
+			break
+		}
+
 		batch, err := b.session.ChannelMessages(channelID, limit, lastMessageID, "", "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch message batch: %w", err)
@@ -227,12 +304,28 @@ func (b *Bot) fetchAllMessages(channelID string) ([]*discordgo.Message, error) {
 			break
 		}
 
-		allMessages = append(allMessages, batch...)
+		for _, msg := range batch {
+			if len(allMessages) >= maxTranscriptMessages || totalBytes >= maxTranscriptBytes {
+				truncated = true
+				break
+			}
+			allMessages = append(allMessages, msg)
+			totalBytes += messageContentSize(msg)
+		}
+
+		if truncated {
+			break
+		}
+
 		lastMessageID = batch[len(batch)-1].ID
 
 		if len(batch) < limit {
 			break
 		}
+	}
+
+	if truncated {
+		log.Printf("[Warning] Transcript for channel %s capped at %d messages / %d bytes", channelID, len(allMessages), totalBytes)
 	}
 
 	// ChannelMessages returns newest first; reverse slice for chronological order

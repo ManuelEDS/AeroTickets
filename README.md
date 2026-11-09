@@ -20,6 +20,7 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
 * **⚖️ Appeals Category**: A dedicated appeal flow that asks which punishment is being appealed and why it should be revoked, so staff can review the case with all the context up front.
 * **📄 Markdown Transcript Archive & User DM**: When a ticket is closed (`🔴 Close Ticket` -> `⚠️ Confirm Closure`):
   - All messages and attachments are formatted into a clean `.md` document and saved locally on disk.
+  - Transcripts are capped at **5,000 messages / 5 MB** to protect bot memory and avoid oversized uploads.
   - The record is registered in SQLite (`transcripts_log`).
   - The `.md` file is uploaded to the server's staff transcript archive channel.
   - **Direct Message (DM) to User**: The bot sends a direct message to the user who created the ticket, informing them that their ticket has been closed and attaching the `.md` transcript file for their personal records.
@@ -33,6 +34,7 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
 * **Appeals ticket category**: new panel button and modal that collect the in-game nickname, the punishment being appealed, and the reason it should be revoked.
 * **`available staff` role**: created automatically by the bot. Eligible staff can self-assign it with `/available` and remove it with `/unavailable`, and it is pinged every time a new ticket is opened.
 * **New permission required**: `Manage Roles` is now required so the bot can create the `available staff` role and add/remove it from members.
+* **Security & anti-abuse hardening**: ticket closure is restricted to the ticket creator and staff, ticket creation is rate-limited to one per user every 60 seconds and serialized per user, and transcripts are capped at 5,000 messages / 5 MB.
 
 ---
 
@@ -195,7 +197,7 @@ docker compose logs -f
 | Command | Description | Who can use it |
 | :--- | :--- | :--- |
 | `/setup-panel` | Deploy the interactive ticket creation panel in the current channel. | Administrator / `Manage Channels` |
-| `/close` | Request to close the current ticket (asks for confirmation, then archives a transcript). | Anyone in a ticket channel |
+| `/close` | Request to close the current ticket (asks for confirmation, then archives a transcript). | Ticket creator / staff |
 | `/ticket-info` | Show a summary of the current ticket. | Anyone in a ticket channel |
 | `/add-user user:@member` | Give a member access to the current ticket channel. | Configured staff / Administrator / `Manage Channels` |
 | `/available` | Self-assign the `available staff` role and receive pings for new tickets. | Members with any role in `staff_role_ids` |
@@ -213,6 +215,8 @@ In the channel where you want users to create tickets (e.g., `#support-tickets`)
 2. AeroBot opens the modal for that category with only the relevant fields.
 3. After the form is submitted, AeroBot creates the private channel `ticket-<id>-<category>` (e.g. `ticket-0052-ship`) and saves the ticket as `RESOLVED`.
 4. A summary card is posted in the new channel, pinging the `available staff` role and showing the **`🔴 Close Ticket`** control.
+
+> **Anti-abuse limits:** each user can open at most one ticket every **60 seconds**, in addition to the limit of **3 active tickets** per user. Ticket closure is restricted to the ticket creator and staff.
 
 ### 3. Closing a Ticket
 1. Click **`🔴 Close Ticket`** or run `/close`.

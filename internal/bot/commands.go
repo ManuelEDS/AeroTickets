@@ -216,15 +216,8 @@ func (b *Bot) cmdSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate
 }
 
 func (b *Bot) cmdCloseTicket(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	ticket, err := b.db.GetTicketByChannelID(i.ChannelID)
-	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "⚠️ This channel is not an active support ticket channel.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+	ticket, ok := b.authorizeTicketClosure(s, i)
+	if !ok {
 		return
 	}
 
