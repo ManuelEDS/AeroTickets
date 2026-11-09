@@ -17,6 +17,7 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
   - Appeals: nickname, punishment being appealed, reason the punishment should be revoked
   - Other: nickname, problem description
   - Private channel and staff notification are created only after the form is submitted (`RESOLVED`)
+* **⚖️ Appeals Category**: A dedicated appeal flow that asks which punishment is being appealed and why it should be revoked, so staff can review the case with all the context up front.
 * **📄 Markdown Transcript Archive & User DM**: When a ticket is closed (`🔴 Close Ticket` -> `⚠️ Confirm Closure`):
   - All messages and attachments are formatted into a clean `.md` document and saved locally on disk.
   - The record is registered in SQLite (`transcripts_log`).
@@ -24,6 +25,14 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
   - **Direct Message (DM) to User**: The bot sends a direct message to the user who created the ticket, informing them that their ticket has been closed and attaching the `.md` transcript file for their personal records.
 * **🛡️ Concurrency-Safe SQLite**: Pure Go SQLite implementation (`modernc.org/sqlite`, zero CGO requirements) with WAL mode and thread-safe operations.
 * **🐳 Production Ready**: Includes multi-stage `Dockerfile` and `docker-compose.yml` for VPS / Linux deployment.
+
+---
+
+## 🆕 Recent Updates
+
+* **Appeals ticket category**: new panel button and modal that collect the in-game nickname, the punishment being appealed, and the reason it should be revoked.
+* **`available staff` role**: created automatically by the bot. Eligible staff can self-assign it with `/available` and remove it with `/unavailable`, and it is pinged every time a new ticket is opened.
+* **New permission required**: `Manage Roles` is now required so the bot can create the `available staff` role and add/remove it from members.
 
 ---
 
@@ -115,6 +124,7 @@ All settings can alternatively be provided or overridden via environment variabl
    - **Scopes**: `bot`, `applications.commands`
    - **Bot Permissions**:
      - `Manage Channels`
+     - `Manage Roles` *(new: required to create the `available staff` role and add/remove it from members)*
      - `View Channels`
      - `Send Messages`
      - `Send Messages in Threads`
@@ -123,6 +133,24 @@ All settings can alternatively be provided or overridden via environment variabl
      - `Read Message History`
      - `Use External Emojis`
 4. Copy the generated invite link and invite the bot to your server.
+
+### Required Permissions Explained
+
+| Permission | Used for |
+| :--- | :--- |
+| `Manage Channels` | Creating/deleting ticket channels, applying permission overwrites, and deploying the panel with `/setup-panel`. |
+| `Manage Roles` | Creating the `available staff` role and adding/removing it when members use `/available` or `/unavailable`. |
+| `View Channels` | Accessing ticket channels and the transcript archive channel. |
+| `Send Messages` | Posting ticket summaries, welcome messages, and status updates. |
+| `Send Messages in Threads` | Posting in ticket threads if threads are used. |
+| `Embed Links` | Sending ticket summary and transcript embeds. |
+| `Attach Files` | Uploading `.md` transcript files to the archive channel and user DMs. |
+| `Read Message History` | Fetching ticket messages to build the transcript on closure. |
+| `Use External Emojis` | Rendering the emojis used in the panel, buttons, and modals. |
+
+> **Role hierarchy:** the bot's own role must be positioned **above** `available staff` to assign or remove it. When the bot creates the role it is placed at the bottom automatically, so no action is needed on first run. If the role already exists higher in the hierarchy, move the bot's role above it.
+>
+> If the bot cannot create the role, check that it has `Manage Roles` and that the server has not reached its role limit; the bot will log a warning and `/available` will report that the role is not ready.
 
 ---
 
@@ -161,6 +189,17 @@ docker compose logs -f
 ---
 
 ## 💬 Commands & Usage
+
+### Command Reference
+
+| Command | Description | Who can use it |
+| :--- | :--- | :--- |
+| `/setup-panel` | Deploy the interactive ticket creation panel in the current channel. | Administrator / `Manage Channels` |
+| `/close` | Request to close the current ticket (asks for confirmation, then archives a transcript). | Anyone in a ticket channel |
+| `/ticket-info` | Show a summary of the current ticket. | Anyone in a ticket channel |
+| `/add-user user:@member` | Give a member access to the current ticket channel. | Configured staff / Administrator / `Manage Channels` |
+| `/available` | Self-assign the `available staff` role and receive pings for new tickets. | Members with any role in `staff_role_ids` |
+| `/unavailable` | Remove the `available staff` role and stop receiving new ticket pings. | Members with any role in `staff_role_ids` |
 
 ### 1. Deploy Ticket Panel
 In the channel where you want users to create tickets (e.g., `#support-tickets`), run:
