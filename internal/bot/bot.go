@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 	"aerobot/internal/transcript"
 	"github.com/bwmarrin/discordgo"
 )
+
+// availableStaffRoleName is the name of the self-assignable role pinged for new tickets.
+const availableStaffRoleName = "available staff"
 
 // Bot manages the Discord ticket bot lifecycle and events
 type Bot struct {
@@ -29,6 +33,9 @@ type Bot struct {
 	categoryPrompt sync.Map
 	// categoryPickerTokens tracks ephemeral category pickers so they can be removed after use.
 	categoryPickerTokens sync.Map
+	// roleMu guards availableStaffRoleID, which is set once the availability role exists.
+	roleMu               sync.RWMutex
+	availableStaffRoleID string
 }
 
 // New creates a new Bot instance
@@ -65,6 +72,14 @@ func (b *Bot) Start() error {
 
 	log.Printf("[Bot] Connected to Discord as %s", b.session.State.User.Username)
 
+	// Make sure the self-assignable availability role exists before handling tickets.
+	if role, err := b.ensureAvailableStaffRole(); err != nil {
+		log.Printf("[Warning] Failed to ensure %q role: %v", availableStaffRoleName, err)
+	} else {
+		b.setAvailableStaffRoleID(role.ID)
+		log.Printf("[Bot] Availability role %q ready (ID: %s)", availableStaffRoleName, role.ID)
+	}
+
 	// Register application slash commands for the specified guild
 	for _, cmd := range ApplicationCommands {
 		_, err := b.session.ApplicationCommandCreate(b.session.State.User.ID, b.cfg.GuildID, cmd)
@@ -90,6 +105,58 @@ func (b *Bot) Stop() error {
 func (b *Bot) handleReady(s *discordgo.Session, r *discordgo.Ready) {
 	log.Printf("[Bot] Logged in as: %s#%s (ID: %s)", r.User.Username, r.User.Discriminator, r.User.ID)
 	s.UpdateGameStatus(0, "Managing Support Tickets")
+}
+
+func (b *Bot) setAvailableStaffRoleID(roleID string) {
+	b.roleMu.Lock()
+	b.availableStaffRoleID = roleID
+	b.roleMu.Unlock()
+}
+
+func (b *Bot) getAvailableStaffRoleID() string {
+	b.roleMu.RLock()
+	defer b.roleMu.RUnlock()
+	return b.availableStaffRoleID
+}
+
+// availableStaffRoleMention returns the role mention used to ping available staff, or "" if unavailable.
+func (b *Bot) availableStaffRoleMention() string {
+	if roleID := b.getAvailableStaffRoleID(); roleID != "" {
+		return "<@&" + roleID + ">"
+	}
+	return ""
+}
+
+// ensureAvailableStaffRole returns the availability role, creating it when missing.
+func (b *Bot) ensureAvailableStaffRole() (*discordgo.Role, error) {
+	roles, err := b.session.GuildRoles(b.cfg.GuildID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list guild roles: %w", err)
+	}
+	for _, role := range roles {
+		if strings.EqualFold(role.Name, availableStaffRoleName) {
+			if !role.Mentionable {
+				updated, err := b.session.GuildRoleEdit(b.cfg.GuildID, role.ID, &discordgo.RoleParams{
+					Mentionable: boolPtr(true),
+				})
+				if err != nil {
+					log.Printf("[Warning] Failed to make %q mentionable: %v", availableStaffRoleName, err)
+					return role, nil
+				}
+				return updated, nil
+			}
+			return role, nil
+		}
+	}
+
+	role, err := b.session.GuildRoleCreate(b.cfg.GuildID, &discordgo.RoleParams{
+		Name:        availableStaffRoleName,
+		Mentionable: boolPtr(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create role: %w", err)
+	}
+	return role, nil
 }
 
 // handleChannelDelete closes any ticket whose channel was deleted outside the normal flow.

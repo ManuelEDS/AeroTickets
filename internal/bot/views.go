@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"aerobot/internal/models"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -16,6 +17,7 @@ const (
 	IDCategoryShip       = "ticket_cat_ship"
 	IDCategoryBug        = "ticket_cat_bug"
 	IDCategoryCrash      = "ticket_cat_crash"
+	IDCategoryAppeal     = "ticket_cat_appeal"
 	IDCategoryOther      = "ticket_cat_other"
 	IDTicketCloseRequest = "ticket_close_request"
 	IDTicketCloseConfirm = "ticket_close_confirm"
@@ -27,6 +29,7 @@ const (
 	IDModalShip     = "modal_ship"
 	IDModalBug      = "modal_bug"
 	IDModalCrash    = "modal_crash"
+	IDModalAppeal   = "modal_appeal"
 	IDModalOther    = "modal_other"
 
 	// Modal field IDs
@@ -34,6 +37,8 @@ const (
 	IDFieldCoords         = "field_coords"
 	IDFieldShipDetails    = "field_ship_details"
 	IDFieldCrashLogs      = "field_crash_logs"
+	IDFieldPunishment     = "field_punishment"
+	IDFieldAppealReason   = "field_appeal_reason"
 	IDFieldAdditionalInfo = "field_additional_info"
 	IDFieldDescription    = "field_description"
 )
@@ -60,7 +65,7 @@ func TicketPanelEmbed() *discordgo.MessageEmbed {
 		Fields: []*discordgo.MessageEmbedField{
 			{
 				Name:   "📌 Categories",
-				Value:  "• Griefing / Stealing\n• Ship Related\n• Bug / Exploit Report\n• Crash Report\n• General Support / Other",
+				Value:  "• Griefing / Stealing\n• Ship Related\n• Bug / Exploit Report\n• Crash Report\n• Appeals\n• General Support / Other",
 				Inline: false,
 			},
 			{
@@ -81,7 +86,7 @@ func TicketPanelComponents() []discordgo.MessageComponent {
 	return CategorySelectionComponents()
 }
 
-// CategorySelectionComponents returns the 5 category buttons in action rows
+// CategorySelectionComponents returns the 6 category buttons in action rows
 func CategorySelectionComponents() []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{
@@ -120,6 +125,14 @@ func CategorySelectionComponents() []discordgo.MessageComponent {
 					CustomID: IDCategoryCrash,
 					Emoji: &discordgo.ComponentEmoji{
 						Name: "💥",
+					},
+				},
+				discordgo.Button{
+					Label:    "Appeals",
+					Style:    discordgo.PrimaryButton,
+					CustomID: IDCategoryAppeal,
+					Emoji: &discordgo.ComponentEmoji{
+						Name: "⚖️",
 					},
 				},
 				discordgo.Button{
@@ -277,6 +290,22 @@ func ModalCrash() *discordgo.InteractionResponse {
 	}
 }
 
+func ModalAppeal() *discordgo.InteractionResponse {
+	return &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: IDModalAppeal,
+			Title:    "⚖️ Punishment Appeal",
+			Flags:    discordgo.MessageFlagsIsComponentsV2,
+			Components: []discordgo.MessageComponent{
+				textInputField("In-Game Nickname", "Enter the nickname you use in-game.", IDFieldNickname, "e.g. StarPilot99", discordgo.TextInputShort, true, 64),
+				textInputField("What punishment are you appealing?", "Include the punishment reason stated in the punishment message.", IDFieldPunishment, "e.g. griefing / stealing / etc", discordgo.TextInputShort, true, 128),
+				textInputField("Why should it be revoked?", "Explain why you think your punishment needs to be revoked. Include any evidence or context.", IDFieldAppealReason, "Tell us what happened and why the punishment should be lifted...", discordgo.TextInputParagraph, true, 1000),
+			},
+		},
+	}
+}
+
 func ModalOther() *discordgo.InteractionResponse {
 	return &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
@@ -341,7 +370,7 @@ func TicketSummaryEmbed(ticket *models.Ticket, staffRoleIDs []string) *discordgo
 
 	if ticket.ProblemDescription != "" {
 		fields = append(fields, &discordgo.MessageEmbedField{
-			Name:   "📝 Problem Description",
+			Name:   "📝 " + models.CategoryProblemLabel(ticket.Category),
 			Value:  ticket.ProblemDescription,
 			Inline: false,
 		})

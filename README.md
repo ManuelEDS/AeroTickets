@@ -6,13 +6,15 @@ A robust, interactive Discord support ticket management bot written in **Go (Gol
 
 ## 🌟 Key Features
 
-* **⚡ Interactive Ticket Panel**: Deploy an embed with five category buttons (Griefing, Ship, Bug, Crash, Other) in any public channel using `/setup-panel`.
+* **⚡ Interactive Ticket Panel**: Deploy an embed with six category buttons (Griefing, Ship, Bug, Crash, Appeals, Other) in any public channel using `/setup-panel`.
+* **🟢 Staff Availability Role**: The bot automatically creates the `available staff` role. Members holding any of the configured staff roles can self-assign it with `/available` or remove it with `/unavailable`, and the role is pinged whenever a new ticket is opened.
 * **🔒 Private Channel Provisioning**: Creates isolated ticket channels under your specified category with locked-down permissions (`@everyone` denied; ticket creator and staff roles granted access).
 * **📝 Category-Specific Modal Forms**: Each panel button opens a modal tailored to that category:
   - Griefing: nickname, incident coordinates, optional additional info
   - Ship: nickname, ship claim name, optional additional info
   - Bug: nickname, problem description
   - Crash: nickname, crash logs, optional additional info
+  - Appeals: nickname, punishment being appealed, reason the punishment should be revoked
   - Other: nickname, problem description
   - Private channel and staff notification are created only after the form is submitted (`RESOLVED`)
 * **📄 Markdown Transcript Archive & User DM**: When a ticket is closed (`🔴 Close Ticket` -> `⚠️ Confirm Closure`):
@@ -35,7 +37,7 @@ AeroBot/
 ├── internal/
 │   ├── bot/
 │   │   ├── bot.go                  # Discord session lifecycle, transcript upload & orphan cleanup
-│   │   ├── commands.go             # Slash commands (/setup-panel, /close, /ticket-info, /add-user)
+│   │   ├── commands.go             # Slash commands (/setup-panel, /close, /ticket-info, /add-user, /available, /unavailable)
 │   │   ├── interactions.go         # Buttons, category modals & close/confirm handlers
 │   │   └── views.go                # Embeds, modals and interactive UI components
 │   ├── config/
@@ -168,10 +170,10 @@ In the channel where you want users to create tickets (e.g., `#support-tickets`)
 *(Requires Administrator or Manage Channels permission)*
 
 ### 2. User Ticket Flow
-1. User clicks one of the five category buttons on the panel.
+1. User clicks one of the six category buttons on the panel.
 2. AeroBot opens the modal for that category with only the relevant fields.
 3. After the form is submitted, AeroBot creates the private channel `ticket-<id>-<category>` (e.g. `ticket-0052-ship`) and saves the ticket as `RESOLVED`.
-4. A summary card is posted in the new channel, pinging the configured staff roles and showing the **`🔴 Close Ticket`** control.
+4. A summary card is posted in the new channel, pinging the `available staff` role and showing the **`🔴 Close Ticket`** control.
 
 ### 3. Closing a Ticket
 1. Click **`🔴 Close Ticket`** or run `/close`.
@@ -184,6 +186,13 @@ In a ticket channel, configured staff or members with Administrator / Manage Cha
 /add-user user:@member
 ```
 The selected member receives permission to view and participate in that ticket.
+
+### 5. Staff Availability
+AeroBot creates and maintains the `available staff` role automatically. Members with any role listed in `staff_role_ids` can toggle their own availability:
+```
+/available    # Receive a ping whenever a new ticket is opened
+/unavailable  # Stop receiving new ticket pings
+```
 
 ---
 

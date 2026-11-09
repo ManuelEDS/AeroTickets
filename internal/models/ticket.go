@@ -22,6 +22,7 @@ const (
 	CategoryShip     TicketCategory = "Ship Related"
 	CategoryBug      TicketCategory = "Bug / Exploit Report"
 	CategoryCrash    TicketCategory = "Crash Report"
+	CategoryAppeal   TicketCategory = "Appeals"
 	CategoryOther    TicketCategory = "Other"
 )
 
@@ -33,8 +34,20 @@ func CategoryDetailLabel(category string) string {
 		return "Ship Claim Name"
 	case CategoryCrash:
 		return "Crash Logs"
+	case CategoryAppeal:
+		return "Punishment Appealed"
 	default:
 		return ""
+	}
+}
+
+// CategoryProblemLabel returns the label used for the problem description field.
+func CategoryProblemLabel(category string) string {
+	switch TicketCategory(category) {
+	case CategoryAppeal:
+		return "Reason for Appeal"
+	default:
+		return "Problem Description"
 	}
 }
 
@@ -48,6 +61,8 @@ func CategoryAbbreviation(category string) string {
 		return "bug"
 	case CategoryCrash:
 		return "crash"
+	case CategoryAppeal:
+		return "appeal"
 	case CategoryOther:
 		return "other"
 	default:

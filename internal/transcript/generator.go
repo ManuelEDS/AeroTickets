@@ -81,7 +81,7 @@ func (g *Generator) GenerateTranscript(
 		sb.WriteString(fmt.Sprintf("- **%s:** %s\n", label, categoryDetails))
 	}
 	sb.WriteString(fmt.Sprintf("- **Additional Info:** %s\n", additionalInfo))
-	sb.WriteString(fmt.Sprintf("- **Problem Description:** %s\n", problemDesc))
+	sb.WriteString(fmt.Sprintf("- **%s:** %s\n", models.CategoryProblemLabel(ticket.Category), problemDesc))
 	sb.WriteString(fmt.Sprintf("- **Closed At:** %s (UTC)\n\n", closedAtStr))
 	sb.WriteString("---\n")
 	sb.WriteString("## MESSAGE HISTORY\n\n")

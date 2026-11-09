@@ -36,6 +36,14 @@ var ApplicationCommands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:        "available",
+		Description: "Get the \"available staff\" role and receive pings for new tickets",
+	},
+	{
+		Name:        "unavailable",
+		Description: "Remove the \"available staff\" role and stop receiving new ticket pings",
+	},
 }
 
 // handleSlashCommand handles slash command executions
@@ -51,6 +59,75 @@ func (b *Bot) handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionC
 		b.cmdTicketInfo(s, i)
 	case "add-user":
 		b.cmdAddTicketUser(s, i, cmdData.Options)
+	case "available":
+		b.cmdSetAvailability(s, i, true)
+	case "unavailable":
+		b.cmdSetAvailability(s, i, false)
+	}
+}
+
+// isEligibleForAvailability reports whether the member holds one of the configured staff roles.
+func (b *Bot) isEligibleForAvailability(i *discordgo.InteractionCreate) bool {
+	if i.Member == nil {
+		return false
+	}
+	for _, memberRoleID := range i.Member.Roles {
+		for _, staffRoleID := range b.cfg.StaffRoleIDs {
+			if memberRoleID == staffRoleID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cmdSetAvailability lets eligible staff add or remove the "available staff" role.
+func (b *Bot) cmdSetAvailability(s *discordgo.Session, i *discordgo.InteractionCreate, available bool) {
+	if !b.isEligibleForAvailability(i) {
+		respondEphemeral(s, i, "⚠️ Only members with a configured staff role can manage the \"available staff\" role.")
+		return
+	}
+
+	roleID := b.getAvailableStaffRoleID()
+	if roleID == "" {
+		respondEphemeral(s, i, "❌ The \"available staff\" role is not ready yet. Please contact an administrator.")
+		return
+	}
+
+	userID := i.Member.User.ID
+	hasRole := false
+	for _, memberRoleID := range i.Member.Roles {
+		if memberRoleID == roleID {
+			hasRole = true
+			break
+		}
+	}
+
+	if available == hasRole {
+		if available {
+			respondEphemeral(s, i, "ℹ️ You already have the \"available staff\" role.")
+		} else {
+			respondEphemeral(s, i, "ℹ️ You already do not have the \"available staff\" role.")
+		}
+		return
+	}
+
+	var err error
+	if available {
+		err = s.GuildMemberRoleAdd(i.GuildID, userID, roleID)
+	} else {
+		err = s.GuildMemberRoleRemove(i.GuildID, userID, roleID)
+	}
+	if err != nil {
+		log.Printf("[Error] Failed to update availability role for user %s: %v", userID, err)
+		respondEphemeral(s, i, "❌ Failed to update the \"available staff\" role. Make sure the bot can manage roles and its role is above \"available staff\".")
+		return
+	}
+
+	if available {
+		respondEphemeral(s, i, "✅ You are now marked as available. You will be pinged for new tickets.")
+	} else {
+		respondEphemeral(s, i, "✅ You are no longer marked as available. You will not be pinged for new tickets.")
 	}
 }
 

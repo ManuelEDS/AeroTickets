@@ -20,7 +20,7 @@ data/
 
 # Transcripts (if kept private locally)
 transcripts/*.md
-!transcripts/.gitkeep
+
 
 # IDE / OS
 .idea/
@@ -28,4 +28,3 @@ transcripts/*.md
 .DS_Store
 Thumbs.db
 
-todo.md

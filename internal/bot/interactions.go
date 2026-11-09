@@ -51,7 +51,7 @@ func (b *Bot) handleComponentInteraction(s *discordgo.Session, i *discordgo.Inte
 	case IDTicketCreate:
 		b.handleCreateTicketButton(s, i)
 
-	case IDCategoryGriefing, IDCategoryShip, IDCategoryBug, IDCategoryCrash, IDCategoryOther:
+	case IDCategoryGriefing, IDCategoryShip, IDCategoryBug, IDCategoryCrash, IDCategoryAppeal, IDCategoryOther:
 		b.handleCategoryButton(s, i, customID)
 
 	case IDTicketCloseRequest:
@@ -293,6 +293,8 @@ func (b *Bot) respondWithCategoryModal(s *discordgo.Session, i *discordgo.Intera
 		modal = ModalBug()
 	case IDCategoryCrash:
 		modal = ModalCrash()
+	case IDCategoryAppeal:
+		modal = ModalAppeal()
 	case IDCategoryOther:
 		modal = ModalOther()
 	default:
@@ -347,6 +349,10 @@ func parseTicketModal(data discordgo.ModalSubmitInteractionData) (ticketModalVal
 	case IDModalCrash:
 		values.category = string(models.CategoryCrash)
 		values.categoryDetails = fields[IDFieldCrashLogs]
+	case IDModalAppeal:
+		values.category = string(models.CategoryAppeal)
+		values.categoryDetails = fields[IDFieldPunishment]
+		values.problemDesc = fields[IDFieldAppealReason]
 	case IDModalOther:
 		values.category = string(models.CategoryOther)
 	default:
@@ -373,6 +379,13 @@ func (v ticketModalValues) validationError() string {
 	case string(models.CategoryCrash):
 		if v.categoryDetails == "" {
 			return "⚠️ Please paste the crash logs."
+		}
+	case string(models.CategoryAppeal):
+		if v.categoryDetails == "" {
+			return "⚠️ Please tell us which punishment you are appealing."
+		}
+		if v.problemDesc == "" {
+			return "⚠️ Please explain why your punishment should be revoked."
 		}
 	case string(models.CategoryBug), string(models.CategoryOther):
 		if v.problemDesc == "" {
@@ -517,8 +530,12 @@ func (b *Bot) handleNewTicketModal(s *discordgo.Session, i *discordgo.Interactio
 		log.Printf("[Warning] Failed to rename ticket channel %s to %s: %v", channel.ID, channelName, err)
 	}
 
-	content := fmt.Sprintf("👋 Welcome <@%s>! **Ticket #%d** has been opened.\n\n", userID, ticket.ID) +
-		"Please do not ping individual staff members or the @everyone/@here roles for personal matters or routine ticket inquiries.\n\n" +
+	content := ""
+	if mention := b.availableStaffRoleMention(); mention != "" {
+		content = fmt.Sprintf("🔔 %s — a new ticket needs attention.\n\n", mention)
+	}
+	content += fmt.Sprintf("👋 Welcome <@%s>! **Ticket #%d** has been opened.\n\n", userID, ticket.ID) +
+		"Please do not ping staff for personal matters or routine ticket inquiries.\n\n" +
 		"Direct pings are strictly reserved for critical emergencies that impact the entire server (such as major downtime, severe network issues, or ongoing malicious attacks).\n\n" +
 		"Pinging staff for non-urgent requests will not result in a faster response and may delay your support. A team member will assist you as soon as possible. Thank you for your patience and cooperation!"
 
@@ -573,7 +590,7 @@ func (b *Bot) disableCategoryButtons(s *discordgo.Session, channelID string) {
 					if !ok {
 						continue
 					}
-					if btn.CustomID == IDCategoryGriefing || btn.CustomID == IDCategoryShip {
+					if btn.CustomID == IDCategoryGriefing || btn.CustomID == IDCategoryShip || btn.CustomID == IDCategoryAppeal {
 						s.ChannelMessageEditComplex(&discordgo.MessageEdit{
 							Channel:    channelID,
 							ID:         msg.ID,
